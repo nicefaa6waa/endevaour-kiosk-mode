@@ -195,41 +195,6 @@ EOF
 
 chmod +x /home/$KIOSK_USER/.xinitrc
 
-# Configure Firefox policies to disable updates and notifications
-print_status "Configuring Firefox policies..."
-mkdir -p /etc/firefox/policies/managed
-cat > /etc/firefox/policies/managed/policies.json <<EOF
-{
-  "policies": {
-    "DisableAppUpdate": true,
-    "DisableNotifications": true,
-    "DisableSystemAddonUpdate": true,
-    "DisableFirefoxStudies": true,
-    "DontCheckDefaultBrowser": true,
-    "NoDefaultBrowserCheck": true,
-    "DisableTelemetry": true,
-    "DisableFirefoxScreenshots": true,
-    "DisablePocket": true,
-    "DisableSetDefaultBrowserPrompt": true
-  }
-}
-EOF
-
-# Create dedicated Firefox profile for kiosk
-print_status "Creating dedicated Firefox profile..."
-PROFILE_DIR="/home/$KIOSK_USER/.mozilla/firefox/kiosk"
-su - $KIOSK_USER -c "firefox -CreateProfile 'kiosk $PROFILE_DIR'" 2>/dev/null || true
-mkdir -p "$PROFILE_DIR"
-cat > "$PROFILE_DIR/user.js" <<EOF
-user_pref("browser.sessionstore.resume_from_crash", false);
-user_pref("browser.sessionstore.resume_session_once", false);
-user_pref("browser.startup.page", 0);
-user_pref("network.proxy.type", 5);
-user_pref("app.update.auto", false);
-user_pref("app.update.enabled", false);
-user_pref("browser.tabs.closeWindowWithLastTab", true);
-EOF
-
 # Create Openbox configuration (improved monitoring)
 print_status "Creating Openbox configuration..."
 mkdir -p /home/$KIOSK_USER/.config/openbox
@@ -244,13 +209,9 @@ else
     exit 1
 fi
 
-PROFILE_DIR="/home/$KIOSK_USER/.mozilla/firefox/kiosk"
-
 # Function to start browser in kiosk mode (using firefox)
 start_browser() {
     firefox \
-        --profile "$PROFILE_DIR" \
-        --private-window \
         --kiosk "$KIOSK_URL" \
         --no-remote \
         --new-instance \
@@ -269,24 +230,22 @@ start_browser() {
 }
 
 # Ensure clean start: kill any lingering Firefox processes
-pkill -u $KIOSK_USER -f firefox 2>/dev/null || true
-sleep 5
+pkill -f firefox 2>/dev/null || true
+sleep 3
 
 # Start the browser
 start_browser
 
 # Monitor browser process and restart if closed (use pgrep for robustness, check all firefox)
 while true; do
-    if ! pgrep -u $KIOSK_USER firefox > /dev/null 2>&1; then
+    if ! pgrep firefox > /dev/null 2>&1; then
         echo "Browser crashed or closed. Restarting..." >&2
         # Clean up any stragglers
-        pkill -u $KIOSK_USER -f firefox 2>/dev/null || true
-        sleep 2
-        pkill -9 -u $KIOSK_USER -f firefox 2>/dev/null || true
-        sleep 8
+        pkill -f firefox 2>/dev/null || true
+        sleep 5
         start_browser
     fi
-    sleep 2
+    sleep 1
 done
 AUTOSTART_SCRIPT
 
@@ -411,7 +370,6 @@ else
     echo "  • SSH Auth: Password (consider adding SSH key later)"
 fi
 echo "  • USB Protection: Enabled"
-echo "  • Firefox: Dedicated profile with notifications disabled"
 echo ""
 print_info "Management Commands:"
 echo "  • Update URL: sudo kiosk-update-url <new-url>"
