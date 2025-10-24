@@ -202,6 +202,16 @@ user_pref("browser.gesture.swipe.left", "");
 user_pref("browser.gesture.swipe.right", "");
 EOF
 
+# Create profiles.ini for Firefox to recognize the kiosk profile
+print_status "Creating Firefox profiles.ini..."
+cat > /home/$KIOSK_USER/.mozilla/firefox/profiles.ini <<EOF
+[Profile0]
+Name=kiosk
+IsRelative=1
+Path=kiosk
+Default=1
+EOF
+
 # Create .xinitrc
 print_status "Creating .xinitrc..."
 cat > /home/$KIOSK_USER/.xinitrc <<EOF
