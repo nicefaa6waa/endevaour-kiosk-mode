@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# EndeavourOS Kiosk Setup Script
+# Debian Kiosk Setup Script
 # Usage: Place this script and kiosk-webapp.py in the same directory, then run: sudo bash kiosk-setup.sh
 #        (Make executable if desired: chmod +x kiosk-setup.sh)
 
@@ -43,7 +43,7 @@ fi
 
 echo ""
 echo "========================================"
-echo "  EndeavourOS Kiosk Setup Installer"
+echo "  Debian Kiosk Setup Installer"
 echo "========================================"
 echo ""
 
@@ -95,24 +95,30 @@ fi
 echo ""
 print_status "Starting installation..."
 
-# Update system
-print_status "Updating system..."
-pacman -Sy --noconfirm
+# Update package lists
+print_status "Updating package lists..."
+apt update -qq
 
-# Install required packages (switched to firefox, added firewalld, removed iptables-nft)
+# Add Google Chrome repository
+print_status "Adding Google Chrome repository..."
+wget -qO- https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list > /dev/null
+apt update -qq
+
+# Install required packages
 print_status "Installing required packages..."
-pacman -S --needed --noconfirm \
-    xorg-server \
-    xorg-xinit \
+apt install -y -qq \
+    xserver-xorg \
+    xinit \
     openbox \
-    firefox \
+    google-chrome-stable \
     unclutter \
     xdotool \
-    openssh \
+    openssh-server \
     usbguard \
-    xorg-xset \
+    x11-xserver-utils \
     sudo \
-    python-flask \
+    python3-flask \
     firewalld
 
 # Create kiosk user
@@ -124,7 +130,7 @@ else
 fi
 
 echo "$KIOSK_USER:$KIOSK_PASS" | chpasswd
-usermod -aG wheel "$KIOSK_USER" 2>/dev/null || true
+usermod -aG sudo "$KIOSK_USER" 2>/dev/null || true
 
 # Setup SSH
 print_status "Configuring SSH..."
@@ -147,8 +153,8 @@ PasswordAuthentication $([ -n "$SSH_PUBLIC_KEY" ] && echo "no" || echo "yes")
 AuthorizedKeysFile .ssh/authorized_keys
 EOF
 
-systemctl enable sshd.service
-systemctl restart sshd.service
+systemctl enable ssh.service
+systemctl restart ssh.service
 
 # Create config directory
 print_status "Creating configuration files..."
@@ -162,7 +168,9 @@ chmod 644 /etc/kiosk/config
 
 # Disable display manager and boot to console (FIXED: disable first to avoid symlink conflict)
 print_status "Disabling display manager and enabling console boot..."
-systemctl disable display-manager.service 2>/dev/null || true
+systemctl disable gdm3.service 2>/dev/null || true
+systemctl disable lightdm.service 2>/dev/null || true
+systemctl disable sddm.service 2>/dev/null || true
 systemctl mask display-manager.service
 systemctl set-default multi-user.target
 systemctl daemon-reload
@@ -185,32 +193,9 @@ EOF
 systemctl daemon-reload
 systemctl enable getty@tty1.service
 
-# Create Firefox kiosk profile with custom prefs
-print_status "Creating Firefox kiosk profile with custom preferences..."
-mkdir -p /home/$KIOSK_USER/.mozilla/firefox/kiosk
-cat > /home/$KIOSK_USER/.mozilla/firefox/kiosk/user.js <<EOF
-user_pref("media.webspeech.synth.enabled", false);
-user_pref("browser.newtabpage.activity-stream.asrouter.enabled", false);
-user_pref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons", false);
-user_pref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features", false);
-user_pref("browser.newtabpage.activity-stream.feeds.asrouterfeed", false);
-user_pref("browser.messaging-system.whatsNewPanel.enabled", false);
-user_pref("browser.vpn_promo.enabled", false);
-user_pref("browser.newtabpage.activity-stream.systemtickers", false);
-user_pref("app.normandy.enabled", false);
-user_pref("browser.gesture.swipe.left", "");
-user_pref("browser.gesture.swipe.right", "");
-EOF
-
-# Create profiles.ini for Firefox to recognize the kiosk profile
-print_status "Creating Firefox profiles.ini..."
-cat > /home/$KIOSK_USER/.mozilla/firefox/profiles.ini <<EOF
-[Profile0]
-Name=kiosk
-IsRelative=1
-Path=kiosk
-Default=1
-EOF
+# Create Chrome kiosk profile directory
+print_status "Creating Chrome kiosk profile directory..."
+mkdir -p /home/$KIOSK_USER/.chrome-kiosk
 
 # Create .xinitrc
 print_status "Creating .xinitrc..."
@@ -237,7 +222,7 @@ mkdir -p /home/$KIOSK_USER/.config/openbox
 cat > /home/$KIOSK_USER/.config/openbox/autostart <<'AUTOSTART_SCRIPT'
 #!/bin/bash
 
-# Function to start browser in kiosk mode (using firefox)
+# Function to start browser in kiosk mode (using chrome)
 start_browser() {
     # Load configuration each time to pick up changes
     if [ -f /etc/kiosk/config ]; then
@@ -247,38 +232,42 @@ start_browser() {
         exit 1
     fi
 
-    firefox \
+    google-chrome-stable \
+        --user-data-dir=/home/$KIOSK_USER/.chrome-kiosk \
         --kiosk "$KIOSK_URL" \
-        --no-remote \
-        --new-instance \
-        --disable-infobars \
         --no-first-run \
-        --disable-session-crashed-bubble \
+        --disable-infobars \
+        --disable-hang-monitor \
         --disable-features=TranslateUI \
-        --check-for-update-interval=31536000 \
-        --disable-component-update \
         --overscroll-history-navigation=0 \
         --disable-pinch \
         --disable-notifications \
         --disable-popup-blocking \
         --disable-dev-shm-usage \
         --disable-extensions \
-        --profile ~/.mozilla/firefox/kiosk &
+        --disable-speech-api \
+        --disable-background-timer-throttling \
+        --disable-renderer-backgrounding \
+        --disable-backgrounding-occluded-windows \
+        --disable-component-update \
+        --no-default-browser-check \
+        --disable-sync \
+        --disable-default-apps &
 }
 
-# Ensure clean start: kill any lingering Firefox processes
-pkill -f firefox 2>/dev/null || true
+# Ensure clean start: kill any lingering Chrome processes
+pkill -f google-chrome 2>/dev/null || true
 sleep 3
 
 # Start the browser
 start_browser
 
-# Monitor browser process and restart if closed (use pgrep for robustness, check all firefox)
+# Monitor browser process and restart if closed (use pgrep for robustness, check all chrome)
 while true; do
-    if ! pgrep firefox > /dev/null 2>&1; then
+    if ! pgrep google-chrome > /dev/null 2>&1; then
         echo "Browser crashed or closed. Restarting..." >&2
         # Clean up any stragglers
-        pkill -f firefox 2>/dev/null || true
+        pkill -f google-chrome 2>/dev/null || true
         sleep 5
         start_browser
     fi
@@ -323,7 +312,7 @@ if grep -q '^GRUB_TIMEOUT=' /etc/default/grub; then
 else
     echo 'GRUB_TIMEOUT=0' >> /etc/default/grub
 fi
-grub-mkconfig -o /boot/grub/grub.cfg
+update-grub
 
 # Set proper ownership
 chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER
@@ -354,7 +343,7 @@ else
     echo "Config not found. Run the main installer first."
     exit 1
 fi
-echo "Restart the system or kill firefox process for changes to take effect."
+echo "Restart the system or kill chrome process for changes to take effect."
 echo "To restart immediately: sudo systemctl restart getty@tty1"
 UPDATE_SCRIPT
 
@@ -381,10 +370,10 @@ fi
 echo ""
 echo "Boot Target: $(systemctl get-default)"
 echo "DM Status: $(systemctl is-enabled display-manager.service 2>/dev/null || echo 'masked/disabled')"
-echo "SSH Status: $(systemctl is-active sshd)"
+echo "SSH Status: $(systemctl is-active ssh)"
 echo "USBGuard Status: $(systemctl is-active usbguard)"
 
-if pgrep -f "firefox --kiosk" > /dev/null; then
+if pgrep -f "google-chrome --kiosk" > /dev/null; then
     echo "Browser Status: Running"
 else
     echo "Browser Status: Not running"
@@ -457,7 +446,7 @@ else
     echo "  • SSH Auth: Password (consider adding SSH key later)"
 fi
 echo "  • USB Protection: Enabled"
-echo "  • Firefox: Custom preferences applied (Web Speech disabled, notifications/promos disabled, swipe gestures disabled)"
+echo "  • Chrome: Custom flags applied (speech disabled, notifications/promos disabled, swipe gestures disabled)"
 echo "  • Web Control: http://[IP]:8080 (login with kiosk credentials)"
 echo ""
 print_info "Management Commands:"
