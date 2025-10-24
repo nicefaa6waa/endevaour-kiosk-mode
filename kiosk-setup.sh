@@ -176,6 +176,13 @@ EOF
 systemctl daemon-reload
 systemctl enable getty@tty1.service
 
+# Create Firefox kiosk profile with custom prefs
+print_status "Creating Firefox kiosk profile with custom preferences..."
+mkdir -p /home/$KIOSK_USER/.mozilla/firefox/kiosk
+cat > /home/$KIOSK_USER/.mozilla/firefox/kiosk/user.js <<EOF
+user_pref("media.webspeech.synth.enabled", false);
+EOF
+
 # Create .xinitrc
 print_status "Creating .xinitrc..."
 cat > /home/$KIOSK_USER/.xinitrc <<EOF
@@ -226,7 +233,8 @@ start_browser() {
         --disable-notifications \
         --disable-popup-blocking \
         --disable-dev-shm-usage \
-        --disable-extensions &
+        --disable-extensions \
+        --profile ~/.mozilla/firefox/kiosk &
 }
 
 # Ensure clean start: kill any lingering Firefox processes
@@ -370,6 +378,7 @@ else
     echo "  • SSH Auth: Password (consider adding SSH key later)"
 fi
 echo "  • USB Protection: Enabled"
+echo "  • Firefox: Web Speech Synthesis disabled"
 echo ""
 print_info "Management Commands:"
 echo "  • Update URL: sudo kiosk-update-url <new-url>"
