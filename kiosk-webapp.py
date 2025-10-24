@@ -11,106 +11,92 @@ app.secret_key = os.environ.get('KIOSK_SECRET_KEY', 'default_secret_key_change_m
 KIOSK_USER = os.environ.get('KIOSK_USER', 'kiosk')  # Fallback
 KIOSK_PASS = os.environ.get('KIOSK_PASS', '')  # Fallback - set securely
 
-# Firefox preferences configuration
-bool_prefs = [
-    "media.webspeech.synth.enabled",
-    "browser.newtabpage.activity-stream.asrouter.enabled",
-    "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons",
-    "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features",
-    "browser.newtabpage.activity-stream.feeds.asrouterfeed",
-    "browser.messaging-system.whatsNewPanel.enabled",
-    "browser.vpn_promo.enabled",
-    "browser.newtabpage.activity-stream.systemtickers",
-    "app.normandy.enabled",
-]
-
-gesture_prefs = [
-    "browser.gesture.swipe.left",
-    "browser.gesture.swipe.right",
-]
-
-all_prefs = bool_prefs + gesture_prefs
-
-pref_names = {
-    "media.webspeech.synth.enabled": "Web Speech Synthesis",
-    "browser.newtabpage.activity-stream.asrouter.enabled": "New Tab Page ASRouter",
-    "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons": "CFR Add-ons Recommendations",
-    "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features": "CFR Features Recommendations",
-    "browser.newtabpage.activity-stream.feeds.asrouterfeed": "New Tab Feeds",
-    "browser.messaging-system.whatsNewPanel.enabled": "What's New Panel",
-    "browser.vpn_promo.enabled": "VPN Promotion",
-    "browser.newtabpage.activity-stream.systemtickers": "System Tickers",
-    "app.normandy.enabled": "Normandy (Telemetry)",
-    "browser.gesture.swipe.left": "Left Swipe Gesture",
-    "browser.gesture.swipe.right": "Right Swipe Gesture",
+toggle_flags = {
+    "infobars": ("--disable-infobars", "Disable Info Bars"),
+    "hang_monitor": ("--disable-hang-monitor", "Disable Hang Monitor"),
+    "translate_ui": ("--disable-features=TranslateUI", "Disable Translate UI"),
+    "overscroll_history": ("--overscroll-history-navigation=0", "Disable Overscroll History Navigation"),
+    "pinch": ("--disable-pinch", "Disable Pinch"),
+    "notifications": ("--disable-notifications", "Disable Notifications"),
+    "popup_blocking": ("--disable-popup-blocking", "Disable Popup Blocking"),
+    "dev_shm_usage": ("--disable-dev-shm-usage", "Disable Dev SHM Usage"),
+    "extensions": ("--disable-extensions", "Disable Extensions"),
+    "speech_api": ("--disable-speech-api", "Disable Speech API"),
+    "background_timer_throttling": ("--disable-background-timer-throttling", "Disable Background Timer Throttling"),
+    "renderer_backgrounding": ("--disable-renderer-backgrounding", "Disable Renderer Backgrounding"),
+    "backgrounding_occluded_windows": ("--disable-backgrounding-occluded-windows", "Disable Backgrounding Occluded Windows"),
+    "component_update": ("--disable-component-update", "Disable Component Update"),
+    "sync": ("--disable-sync", "Disable Sync"),
+    "default_apps": ("--disable-default-apps", "Disable Default Apps"),
 }
 
-def ensure_profiles_ini():
-    profiles_dir = f"/home/{KIOSK_USER}/.mozilla/firefox"
-    profiles_ini_path = os.path.join(profiles_dir, "profiles.ini")
-    if not os.path.exists(profiles_ini_path):
-        os.makedirs(profiles_dir, exist_ok=True)
-        with open(profiles_ini_path, 'w') as f:
-            f.write("""[Profile0]
-Name=kiosk
-IsRelative=1
-Path=kiosk
-Default=1
-""")
-        subprocess.run(["chown", f"{KIOSK_USER}:{KIOSK_USER}", profiles_ini_path], check=False)
+all_prefs = list(toggle_flags.keys())
+pref_names = {k: d for k, (_, d) in toggle_flags.items()}
+
+fixed_flags = [
+    '--user-data-dir=/home/$KIOSK_USER/.chrome-kiosk',
+    '--kiosk "$KIOSK_URL"',
+    '--no-first-run',
+]
 
 def load_prefs_states():
-    states = {p: False for p in all_prefs}  # Default to enabled (not disabled)
-    path = f"/home/{KIOSK_USER}/.mozilla/firefox/kiosk/user.js"
-    if os.path.exists(path):
-        with open(path, 'r') as f:
+    states = {p: False for p in all_prefs}
+    autostart_path = f"/home/{KIOSK_USER}/.config/openbox/autostart"
+    if os.path.exists(autostart_path):
+        with open(autostart_path, 'r') as f:
             content = f.read()
-            for pref in bool_prefs:
-                if f'"{pref}", false' in content:
-                    states[pref] = True  # disabled
-            for pref in gesture_prefs:
-                if f'"{pref}", ""' in content:
-                    states[pref] = True  # disabled
-    else:
-        # If file doesn't exist, assume all disabled for kiosk default
-        for p in all_prefs:
-            states[p] = True
+            for pref in all_prefs:
+                flag, _ = toggle_flags[pref]
+                if flag in content:
+                    states[pref] = True
     return states
 
 def save_prefs(form_states):
-    ensure_profiles_ini()
-    states = {}
-    for pref in bool_prefs:
-        key = f"disable_{pref.replace('.', '_')}"
-        states[pref] = key in form_states
-    for pref in gesture_prefs:
-        key = f"disable_{pref.replace('.', '_')}"
-        states[pref] = key in form_states
+    selected = []
+    for pref in all_prefs:
+        if f"disable_{pref}" in form_states:
+            flag, _ = toggle_flags[pref]
+            selected.append(flag)
 
-    profile_dir = f"/home/{KIOSK_USER}/.mozilla/firefox/kiosk"
-    user_js_path = os.path.join(profile_dir, "user.js")
-    os.makedirs(profile_dir, exist_ok=True)
-    with open(user_js_path, 'w') as f:
-        for pref, disabled in states.items():
-            if pref in bool_prefs:
-                val = "false" if disabled else "true"
-                f.write(f'user_pref("{pref}", {val});\n')
-            else:
-                if disabled:
-                    val = '""'
-                elif pref == "browser.gesture.swipe.left":
-                    val = '"Browser:BackOrBackDuplicate"'
-                else:
-                    val = '"Browser:ForwardOrForwardDuplicate"'
-                f.write(f'user_pref("{pref}", {val});\n')
+    all_flags_list = fixed_flags + selected
+    chrome_cmd = "google-chrome-stable \\\\\n        " + " \\\\\n        ".join(all_flags_list) + " &"
 
-    # Force reload by removing prefs.js cache
-    prefs_js_path = os.path.join(profile_dir, "prefs.js")
-    subprocess.run(["rm", "-f", prefs_js_path], check=False)
+    start_browser_func = f'''start_browser() {{
+    # Load configuration each time to pick up changes
+    if [ -f /etc/kiosk/config ]; then
+        source /etc/kiosk/config
+    else
+        echo "Kiosk config not found. Exiting." >&2
+        exit 1
+    fi
 
-    # Ensure ownership
-    subprocess.run(["chown", f"{KIOSK_USER}:{KIOSK_USER}", user_js_path], check=False)
-    subprocess.run(["chown", "-R", f"{KIOSK_USER}:{KIOSK_USER}", profile_dir], check=False)
+    {chrome_cmd}
+}}'''
+
+    monitor_part = '''# Monitor browser process and restart if closed (use pgrep for robustness, check all chrome)
+while true; do
+    if ! pgrep google-chrome > /dev/null 2>&1; then
+        echo "Browser crashed or closed. Restarting..." >&2
+        # Clean up any stragglers
+        pkill -f google-chrome 2>/dev/null || true
+        sleep 5
+        start_browser
+    fi
+    sleep 1
+done'''
+
+    beginning = '''#!/bin/bash
+
+# Function to start browser in kiosk mode (using chrome)
+'''
+
+    full_autostart = beginning + start_browser_func + '\n\n# Ensure clean start: kill any lingering Chrome processes\npkill -f google-chrome 2>/dev/null || true\nsleep 3\n\n# Start the browser\nstart_browser\n\n' + monitor_part
+
+    autostart_path = f"/home/{KIOSK_USER}/.config/openbox/autostart"
+    with open(autostart_path, 'w') as f:
+        f.write(full_autostart)
+    os.chmod(autostart_path, 0o755)
+    subprocess.run(["chown", f"{KIOSK_USER}:{KIOSK_USER}", autostart_path], check=False)
 
 def get_usb_status():
     try:
@@ -255,19 +241,19 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 <hr>
 
 <section>
-<h2>Firefox Preferences</h2>
+<h2>Chrome Flags</h2>
 <form method="post" action="/save_prefs">
     {% for pref in all_prefs %}
         {% set disabled = states[pref] %}
         <label>
-            <input type="checkbox" name="disable_{{ pref.replace('.', '_') }}" {{ 'checked' if disabled else '' }}>
-            {{ pref_names[pref] }} {% if not disabled %}(Enabled){% else %}(Disabled){% endif %}
+            <input type="checkbox" name="disable_{{ pref }}" {{ 'checked' if disabled else '' }}>
+            {{ pref_names[pref] }} {% if disabled %}(Disabled){% else %}(Enabled){% endif %}
         </label>
     {% endfor %}
     <br><br>
-    <input type="submit" value="Save Preferences" onclick="return confirm('Save changes? Restart browser to apply.');">
+    <input type="submit" value="Save Flags" onclick="return confirm('Save changes? Restart browser to apply.');">
 </form>
-<p><small>Disabled means the feature is turned off for kiosk mode.</small></p>
+<p><small>Checked means the feature is disabled (flag included).</small></p>
 </section>
 <hr>
 
@@ -303,9 +289,9 @@ def update_url():
 def save_prefs_route():
     try:
         save_prefs(request.form)
-        flash('Firefox preferences saved. Restart browser to apply.')
+        flash('Chrome flags saved. Restart browser to apply.')
     except Exception as e:
-        flash(f'Error saving prefs: {str(e)}')
+        flash(f'Error saving flags: {str(e)}')
     return redirect(url_for('dashboard'))
 
 @app.route('/toggle_usb', methods=['POST'])
@@ -321,7 +307,7 @@ def toggle_usb_route():
 @app.route('/restart_browser')
 def restart_browser():
     try:
-        subprocess.run(['pkill', '-f', 'firefox'], check=True)
+        subprocess.run(['pkill', '-f', 'google-chrome'], check=True)
         flash('Browser restarted successfully.')
     except Exception as e:
         flash(f'Error restarting browser: {str(e)}')
