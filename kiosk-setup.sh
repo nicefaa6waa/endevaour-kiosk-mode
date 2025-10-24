@@ -106,7 +106,7 @@ pacman -S --needed --noconfirm \
     xorg-xset \
     sudo \
     python-flask \
-    iptables
+    iptables-nft
 
 # Create kiosk user
 print_status "Creating kiosk user..."
@@ -536,11 +536,12 @@ systemctl enable kiosk-web.service
 
 # Open port 8080 in firewall
 print_status "Opening port 8080 for web app..."
+mkdir -p /etc/iptables
 iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
 ip6tables -A INPUT -p tcp --dport 8080 -j ACCEPT
 iptables-save > /etc/iptables/iptables.rules
 ip6tables-save > /etc/iptables/ip6tables.rules
-systemctl enable iptables ip6tables
+systemctl enable iptables.service ip6tables.service
 
 # Final summary
 echo ""
