@@ -236,18 +236,30 @@ start_browser() {
         exit 1
     fi
 
+    # Clear crash flag to prevent restore prompts or crashes
+    CHROME_PROFILE="$HOME/.chrome-kiosk"
+    if [ -f "$CHROME_PROFILE/Default/Preferences" ]; then
+        sed -i 's/"exited_cleanly":false/"exited_cleanly":true/g' "$CHROME_PROFILE/Default/Preferences"
+    fi
+
+    echo "Starting Chrome kiosk with URL: $KIOSK_URL" >> /tmp/kiosk.log
+
     google-chrome-stable \
-        --user-data-dir=/home/$KIOSK_USER/.chrome-kiosk \
+        --no-sandbox \
+        --disable-gpu \
+        --disable-software-rasterizer \
+        --disable-dev-shm-usage \
+        --user-data-dir="$CHROME_PROFILE" \
         --kiosk "$KIOSK_URL" \
         --no-first-run \
         --disable-infobars \
+        --disable-session-crashed-bubble \
         --disable-hang-monitor \
         --disable-features=TranslateUI \
         --overscroll-history-navigation=0 \
         --disable-pinch \
         --disable-notifications \
         --disable-popup-blocking \
-        --disable-dev-shm-usage \
         --disable-extensions \
         --disable-speech-api \
         --disable-background-timer-throttling \
@@ -269,7 +281,7 @@ start_browser
 # Monitor browser process and restart if closed (use pgrep for robustness, check all chrome)
 while true; do
     if ! pgrep google-chrome > /dev/null 2>&1; then
-        echo "Browser crashed or closed. Restarting..." >&2
+        echo "$(date): Browser crashed or closed. Restarting..." >> /tmp/kiosk.log
         # Clean up any stragglers
         pkill -f google-chrome 2>/dev/null || true
         sleep 5
@@ -478,3 +490,6 @@ echo "  sudo systemctl set-default graphical.target"
 echo "  sudo reboot"
 echo ""
 print_warning "Note: Web app credentials are set via systemd environment (root-only access to service file)"
+echo ""
+print_info "Debug Tip: After reboot, check /tmp/kiosk.log for startup URL and crash logs."
+echo "If still crashing, SSH in and run: journalctl -u getty@tty1 -f to watch boot."
