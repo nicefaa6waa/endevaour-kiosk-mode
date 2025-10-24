@@ -181,6 +181,14 @@ print_status "Creating Firefox kiosk profile with custom preferences..."
 mkdir -p /home/$KIOSK_USER/.mozilla/firefox/kiosk
 cat > /home/$KIOSK_USER/.mozilla/firefox/kiosk/user.js <<EOF
 user_pref("media.webspeech.synth.enabled", false);
+user_pref("browser.newtabpage.activity-stream.asrouter.enabled", false);
+user_pref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons", false);
+user_pref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features", false);
+user_pref("browser.newtabpage.activity-stream.feeds.asrouterfeed", false);
+user_pref("browser.messaging-system.whatsNewPanel.enabled", false);
+user_pref("browser.vpn_promo.enabled", false);
+user_pref("browser.newtabpage.activity-stream.systemtickers", false);
+user_pref("app.normandy.enabled", false);
 EOF
 
 # Create .xinitrc
@@ -287,6 +295,15 @@ EOF
 
 systemctl enable usbguard.service
 
+# Disable GRUB timeout for instant boot
+print_status "Disabling GRUB timeout for instant boot..."
+if grep -q '^GRUB_TIMEOUT=' /etc/default/grub; then
+    sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=0/' /etc/default/grub
+else
+    echo 'GRUB_TIMEOUT=0' >> /etc/default/grub
+fi
+grub-mkconfig -o /boot/grub/grub.cfg
+
 # Set proper ownership
 chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER
 
@@ -371,6 +388,7 @@ print_info "Configuration:"
 echo "  • Username: $KIOSK_USER"
 echo "  • Kiosk URL: $KIOSK_URL"
 echo "  • Boot Mode: Console (DM disabled/masked)"
+echo "  • GRUB: Instant boot (timeout disabled)"
 echo "  • SSH: Enabled on port 22"
 if [ -n "$SSH_PUBLIC_KEY" ]; then
     echo "  • SSH Auth: Key-based only"
@@ -378,7 +396,7 @@ else
     echo "  • SSH Auth: Password (consider adding SSH key later)"
 fi
 echo "  • USB Protection: Enabled"
-echo "  • Firefox: Web Speech Synthesis disabled"
+echo "  • Firefox: Custom preferences applied (Web Speech disabled, notifications/promos disabled)"
 echo ""
 print_info "Management Commands:"
 echo "  • Update URL: sudo kiosk-update-url <new-url>"
