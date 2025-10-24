@@ -92,7 +92,7 @@ print_status "Starting installation..."
 print_status "Updating system..."
 pacman -Sy --noconfirm
 
-# Install required packages (switched to firefox)
+# Install required packages (switched to firefox, added firewalld, removed iptables-nft)
 print_status "Installing required packages..."
 pacman -S --needed --noconfirm \
     xorg-server \
@@ -106,7 +106,7 @@ pacman -S --needed --noconfirm \
     xorg-xset \
     sudo \
     python-flask \
-    iptables-nft
+    firewalld
 
 # Create kiosk user
 print_status "Creating kiosk user..."
@@ -534,14 +534,13 @@ EOF
 systemctl daemon-reload
 systemctl enable kiosk-web.service
 
-# Open port 8080 in firewall
-print_status "Opening port 8080 for web app..."
-mkdir -p /etc/iptables
-iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
-ip6tables -A INPUT -p tcp --dport 8080 -j ACCEPT
-iptables-save > /etc/iptables/iptables.rules
-ip6tables-save > /etc/iptables/ip6tables.rules
-systemctl enable iptables.service ip6tables.service
+# Open port 8080 and 22 in firewall using firewalld
+print_status "Configuring firewalld and opening ports 22 and 8080..."
+systemctl enable firewalld.service
+systemctl start firewalld.service
+firewall-cmd --permanent --add-port=22/tcp
+firewall-cmd --permanent --add-port=8080/tcp
+firewall-cmd --reload
 
 # Final summary
 echo ""
