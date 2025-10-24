@@ -231,7 +231,7 @@ chown "$KIOSK_USER:$KIOSK_USER" "/home/$KIOSK_USER/.xbindkeysrc"
 print_status "Creating .bash_profile..."
 cat > "/home/$KIOSK_USER/.bash_profile" <<EOF
 if [[ -z \$DISPLAY && \$(tty) = /dev/tty1 ]]; then
-    print_info "Starting X on tty1..."
+    echo "[i] Starting X on tty1..."
     exec startx
 fi
 EOF
@@ -291,7 +291,10 @@ EOF
 chmod +x /usr/local/bin/kiosk-status
 
 echo ""
-print_status "Complete! REBOOT to test."
-IP=$(hostname -I | awk '{print $1}')
-echo "SSH: ssh $KIOSK_USER@$IP"
-echo "Post-reboot check: kiosk-status"
+print_status "Setup complete! Please reboot to activate the kiosk mode."
+echo ""
+print_info "After reboot, the system will auto-login as $KIOSK_USER and start the kiosk browser."
+IP=$(ip route get 1 | awk '{print $7; exit}')
+echo "To connect via SSH: ssh $KIOSK_USER@$IP"
+echo "To check status post-reboot: sudo kiosk-status"
+echo ""
