@@ -229,17 +229,23 @@ start_browser() {
         --disable-extensions &
 }
 
+# Ensure clean start: kill any lingering Firefox processes
+pkill -f firefox 2>/dev/null || true
+sleep 3
+
 # Start the browser
 start_browser
 
-# Monitor browser process and restart if closed (use pgrep for robustness)
+# Monitor browser process and restart if closed (use pgrep for robustness, check all firefox)
 while true; do
-    if ! pgrep -f "firefox --kiosk" > /dev/null 2>&1; then
+    if ! pgrep firefox > /dev/null 2>&1; then
         echo "Browser crashed or closed. Restarting..." >&2
-        sleep 2
+        # Clean up any stragglers
+        pkill -f firefox 2>/dev/null || true
+        sleep 5
         start_browser
     fi
-    sleep 5
+    sleep 1
 done
 AUTOSTART_SCRIPT
 
@@ -370,7 +376,8 @@ echo "  • Update URL: sudo kiosk-update-url <new-url>"
 echo "  • Check status: kiosk-status"
 echo ""
 print_info "SSH Connection:"
-echo "  ssh $KIOSK_USER@\$(hostname -I | awk '{print \$1}')"
+IP=$(hostname -I | awk '{print $1}')
+echo "  ssh $KIOSK_USER@$IP"
 echo ""
 print_warning "REBOOT REQUIRED FOR KIOSK MODE (DM changes take effect)"
 echo "  sudo reboot"
