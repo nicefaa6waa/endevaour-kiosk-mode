@@ -2,6 +2,8 @@
 
 # EndeavourOS Kiosk Setup Script
 # Usage: curl -sSL https://raw.githubusercontent.com/yourusername/yourrepo/main/kiosk-setup.sh | sudo bash
+# Note: For readability, the Python web app is now in a separate file: kiosk-webapp.py
+#       Place it at /usr/local/bin/kiosk-webapp.py before running, or embed via heredoc if preferred.
 
 set -e
 
@@ -382,135 +384,14 @@ STATUS_SCRIPT
 
 chmod +x /usr/local/bin/kiosk-status
 
-# Create web control app
-print_status "Creating web control app..."
-SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || echo "default_secret_key_change_me")
-cat > /usr/local/bin/kiosk-webapp.py <<PYEOF
-#!/usr/bin/env python3
-
-import os
-import subprocess
-from flask import Flask, request, session, redirect, url_for, render_template_string, flash
-
-app = Flask(__name__)
-app.secret_key = '$SECRET_KEY'
-
-KIOSK_USER = '$KIOSK_USER'
-KIOSK_PASS = '$KIOSK_PASS'
-
-def logged_in():
-    return session.get('logged_in', False)
-
-@app.before_request
-def require_login():
-    if request.endpoint and request.endpoint != 'login' and request.endpoint != 'static' and not logged_in():
-        return redirect(url_for('login'))
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        if request.form['username'] == KIOSK_USER and request.form['password'] == KIOSK_PASS:
-            session['logged_in'] = True
-            flash('Logged in successfully')
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Invalid credentials')
-    return render_template_string('''
-<!DOCTYPE html>
-<html><head><title>Kiosk Login</title></head><body>
-<h1>Kiosk Control Login</h1>
-<form method="post">
-    Username: <input type="text" name="username"><br><br>
-    Password: <input type="password" name="password"><br><br>
-    <input type="submit" value="Login">
-</form>
-{% with messages = get_flashed_messages() %}
-  {% if messages %}
-    <ul>
-    {% for message in messages %}
-      <li>{{ message }}</li>
-    {% endfor %}
-    </ul>
-  {% endif %}
-{% endwith %}
-</body></html>
-    ''')
-
-@app.route('/logout')
-def logout():
-    session.pop('logged_in', None)
-    flash('Logged out successfully')
-    return redirect(url_for('login'))
-
-@app.route('/')
-def dashboard():
-    try:
-        status_output = subprocess.check_output(['/usr/local/bin/kiosk-status']).decode('utf-8')
-    except:
-        status_output = "Error getting status"
-    try:
-        with open('/etc/kiosk/config', 'r') as f:
-            lines = f.readlines()
-            url_line = [line for line in lines if 'KIOSK_URL' in line][0]
-            current_url = url_line.split('=')[1].strip().strip('"')
-    except:
-        current_url = "Unknown"
-    return render_template_string('''
-<!DOCTYPE html>
-<html><head><title>Kiosk Dashboard</title></head><body>
-<h1>Kiosk Dashboard</h1>
-<p><a href="/logout">Logout</a></p>
-<h2>Current URL: {{ current_url }}</h2>
-<h2>Status</h2>
-<pre>{{ status_output }}</pre>
-<h2>Update URL</h2>
-<form method="post" action="/update_url">
-    New URL: <input type="text" name="new_url" value="{{ current_url }}"><br><br>
-    <input type="submit" value="Update URL">
-</form>
-<h2>Controls</h2>
-<p><a href="/restart_browser">Restart Browser</a></p>
-<p><a href="/reboot" onclick="return confirm('Reboot the system?')">Reboot System</a></p>
-{% with messages = get_flashed_messages() %}
-  {% if messages %}
-    <ul>
-    {% for message in messages %}
-      <li>{{ message }}</li>
-    {% endfor %}
-    </ul>
-  {% endif %}
-{% endwith %}
-</body></html>
-    ''', status_output=status_output, current_url=current_url)
-
-@app.route('/update_url', methods=['POST'])
-def update_url():
-    new_url = request.form['new_url']
-    try:
-        subprocess.run(['sed', '-i', f's|KIOSK_URL=.*|KIOSK_URL=\\"{new_url}\\"|g', '/etc/kiosk/config'], check=True)
-        flash('URL updated successfully. Restart browser or reboot to apply.')
-    except Exception as e:
-        flash(f'Error updating URL: {str(e)}')
-    return redirect(url_for('dashboard'))
-
-@app.route('/restart_browser')
-def restart_browser():
-    try:
-        subprocess.run(['pkill', '-f', 'firefox'], check=True)
-        flash('Browser restarted successfully.')
-    except Exception as e:
-        flash(f'Error restarting browser: {str(e)}')
-    return redirect(url_for('dashboard'))
-
-@app.route('/reboot')
-def reboot():
-    os.system('reboot')
-    return 'Rebooting...'
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=False)
-PYEOF
-
+# Create web control app (Python now separate - copy kiosk-webapp.py to /usr/local/bin/ before running)
+print_status "Setting up web control app..."
+# TODO: If embedding, use: cat > /usr/local/bin/kiosk-webapp.py <<PYEOF ... PYEOF
+# For now, assume pre-placed or adjust path
+if [ ! -f /usr/local/bin/kiosk-webapp.py ]; then
+    print_error "kiosk-webapp.py not found at /usr/local/bin/. Please place it there and rerun."
+    exit 1
+fi
 chmod 600 /usr/local/bin/kiosk-webapp.py
 
 # Create systemd service for web app
@@ -523,7 +404,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/bin/python /usr/local/bin/kiosk-webapp.py
+ExecStart=/usr/bin/python3 /usr/local/bin/kiosk-webapp.py
 Restart=always
 RestartSec=5
 
