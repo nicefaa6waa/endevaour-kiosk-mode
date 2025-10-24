@@ -99,6 +99,10 @@ print_status "Starting installation..."
 print_status "Updating package lists..."
 apt update -qq
 
+# Install essential user management tools (fixes adduser/useradd issues on minimal installs)
+print_status "Ensuring user management tools are available..."
+apt install -y -qq passwd adduser
+
 # Add Google Chrome repository
 print_status "Adding Google Chrome repository..."
 wget -qO- https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
