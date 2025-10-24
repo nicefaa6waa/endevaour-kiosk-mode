@@ -42,15 +42,19 @@ echo ""
 
 # Interactive prompts
 read -p "Enter kiosk username: " KIOSK_USER
-while true; do
+
+# Password input with confirmation
+KIOSK_PASS=""
+KIOSK_PASS_CONFIRM=""
+while [ "$KIOSK_PASS" != "$KIOSK_PASS_CONFIRM" ] || [ -z "$KIOSK_PASS" ]; do
     read -s -p "Enter password for $KIOSK_USER: " KIOSK_PASS
     echo
     read -s -p "Confirm password: " KIOSK_PASS_CONFIRM
     echo
-    if [ "$KIOSK_PASS" = "$KIOSK_PASS_CONFIRM" ]; then
-        break
-    else
+    if [ "$KIOSK_PASS" != "$KIOSK_PASS_CONFIRM" ]; then
         print_error "Passwords do not match. Try again."
+    elif [ -z "$KIOSK_PASS" ]; then
+        print_error "Password cannot be empty. Try again."
     fi
 done
 
