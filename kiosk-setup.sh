@@ -152,13 +152,22 @@ EOF
 chmod 644 /etc/kiosk/config
 
 # Configure autologin
-print_status "Configuring autologin..."
+print_status "Configuring autologin for $KIOSK_USER..."
 mkdir -p /etc/systemd/system/getty@tty1.service.d/
+
+# Remove any existing autologin configuration
+rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
+rm -f /etc/systemd/system/getty@tty1.service.d/override.conf
+
+# Create new autologin configuration
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<EOF
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty -o '-p -f -- \\u' --noclear --autologin $KIOSK_USER %I \$TERM
 EOF
+
+# Reload systemd
+systemctl daemon-reload
 
 # Create .xinitrc
 print_status "Creating .xinitrc..."
