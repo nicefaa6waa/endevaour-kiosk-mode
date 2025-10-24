@@ -189,6 +189,8 @@ user_pref("browser.messaging-system.whatsNewPanel.enabled", false);
 user_pref("browser.vpn_promo.enabled", false);
 user_pref("browser.newtabpage.activity-stream.systemtickers", false);
 user_pref("app.normandy.enabled", false);
+user_pref("browser.gesture.swipe.left", "");
+user_pref("browser.gesture.swipe.right", "");
 EOF
 
 # Create .xinitrc
@@ -396,7 +398,7 @@ else
     echo "  • SSH Auth: Password (consider adding SSH key later)"
 fi
 echo "  • USB Protection: Enabled"
-echo "  • Firefox: Custom preferences applied (Web Speech disabled, notifications/promos disabled)"
+echo "  • Firefox: Custom preferences applied (Web Speech disabled, notifications/promos disabled, swipe gestures disabled)"
 echo ""
 print_info "Management Commands:"
 echo "  • Update URL: sudo kiosk-update-url <new-url>"
