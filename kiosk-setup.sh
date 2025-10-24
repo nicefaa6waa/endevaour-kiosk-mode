@@ -148,10 +148,20 @@ systemctl daemon-reload
 systemctl enable getty@tty1
 print_info "Autologin: journalctl -u getty@tty1 -n 10"
 
-# Firefox profile (CLEAN BEFORE CREATE)
+# Firefox profile (MANUAL CREATION TO AVOID DISPLAY REQUIREMENT)
 print_status "Setting up Firefox profile (cleaning existing)..."
-rm -rf "/home/$KIOSK_USER/.mozilla/firefox/kiosk"  # Nuke for re-run
-su - "$KIOSK_USER" -c "firefox -CreateProfile 'kiosk /home/$KIOSK_USER/.mozilla/firefox/kiosk'"
+rm -rf "/home/$KIOSK_USER/.mozilla"
+mkdir -p "/home/$KIOSK_USER/.mozilla/firefox/kiosk"
+cat > "/home/$KIOSK_USER/.mozilla/firefox/profiles.ini" <<EOF
+[General]
+StartWithLastProfile=1
+
+[Profile0]
+Name=kiosk
+IsRelative=1
+Path=kiosk
+Default=1
+EOF
 cat > "/home/$KIOSK_USER/.mozilla/firefox/kiosk/user.js" <<EOF
 user_pref("browser.startup.homepage", "$KIOSK_URL");
 user_pref("browser.tabs.warnOnClose", false);
