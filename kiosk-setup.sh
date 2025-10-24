@@ -151,8 +151,9 @@ EOF
 
 chmod 644 /etc/kiosk/config
 
-# Disable display manager and boot to console
+# Disable display manager and boot to console (FIXED: disable first to avoid symlink conflict)
 print_status "Disabling display manager and enabling console boot..."
+systemctl disable display-manager.service 2>/dev/null || true
 systemctl mask display-manager.service
 systemctl set-default multi-user.target
 systemctl daemon-reload
@@ -327,7 +328,7 @@ fi
 
 echo ""
 echo "Boot Target: $(systemctl get-default)"
-echo "DM Status: $(systemctl is-enabled display-manager.service 2>/dev/null || echo 'masked')"
+echo "DM Status: $(systemctl is-enabled display-manager.service 2>/dev/null || echo 'masked/disabled')"
 echo "SSH Status: $(systemctl is-active sshd)"
 echo "USBGuard Status: $(systemctl is-active usbguard)"
 
@@ -340,8 +341,8 @@ fi
 echo ""
 echo "Available commands:"
 echo "  sudo kiosk-update-url <url>  - Update kiosk URL"
-echo "  sudo kiosk-status            - Show this status"
-echo "  sudo reboot                  - Restart to apply changes"
+echo "  kiosk-status                  - Show this status"
+echo "  sudo reboot                   - Restart to apply changes"
 STATUS_SCRIPT
 
 chmod +x /usr/local/bin/kiosk-status
@@ -355,7 +356,7 @@ echo ""
 print_info "Configuration:"
 echo "  • Username: $KIOSK_USER"
 echo "  • Kiosk URL: $KIOSK_URL"
-echo "  • Boot Mode: Console (DM disabled)"
+echo "  • Boot Mode: Console (DM disabled/masked)"
 echo "  • SSH: Enabled on port 22"
 if [ -n "$SSH_PUBLIC_KEY" ]; then
     echo "  • SSH Auth: Key-based only"
