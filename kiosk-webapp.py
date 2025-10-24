@@ -45,6 +45,20 @@ pref_names = {
     "browser.gesture.swipe.right": "Right Swipe Gesture",
 }
 
+def ensure_profiles_ini():
+    profiles_dir = f"/home/{KIOSK_USER}/.mozilla/firefox"
+    profiles_ini_path = os.path.join(profiles_dir, "profiles.ini")
+    if not os.path.exists(profiles_ini_path):
+        os.makedirs(profiles_dir, exist_ok=True)
+        with open(profiles_ini_path, 'w') as f:
+            f.write("""[Profile0]
+Name=kiosk
+IsRelative=1
+Path=kiosk
+Default=1
+""")
+        subprocess.run(["chown", f"{KIOSK_USER}:{KIOSK_USER}", profiles_ini_path], check=False)
+
 def load_prefs_states():
     states = {p: False for p in all_prefs}  # Default to enabled (not disabled)
     path = f"/home/{KIOSK_USER}/.mozilla/firefox/kiosk/user.js"
@@ -64,6 +78,7 @@ def load_prefs_states():
     return states
 
 def save_prefs(form_states):
+    ensure_profiles_ini()
     states = {}
     for pref in bool_prefs:
         key = f"disable_{pref.replace('.', '_')}"
