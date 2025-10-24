@@ -87,9 +87,10 @@ def save_prefs(form_states):
         key = f"disable_{pref.replace('.', '_')}"
         states[pref] = key in form_states
 
-    path = f"/home/{KIOSK_USER}/.mozilla/firefox/kiosk/user.js"
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
+    profile_dir = f"/home/{KIOSK_USER}/.mozilla/firefox/kiosk"
+    user_js_path = os.path.join(profile_dir, "user.js")
+    os.makedirs(profile_dir, exist_ok=True)
+    with open(user_js_path, 'w') as f:
         for pref, disabled in states.items():
             if pref in bool_prefs:
                 val = "false" if disabled else "true"
@@ -102,7 +103,14 @@ def save_prefs(form_states):
                 else:
                     val = '"Browser:ForwardOrForwardDuplicate"'
                 f.write(f'user_pref("{pref}", {val});\n')
-    subprocess.run(["chown", f"{KIOSK_USER}:{KIOSK_USER}", path], check=False)
+
+    # Force reload by removing prefs.js cache
+    prefs_js_path = os.path.join(profile_dir, "prefs.js")
+    subprocess.run(["rm", "-f", prefs_js_path], check=False)
+
+    # Ensure ownership
+    subprocess.run(["chown", f"{KIOSK_USER}:{KIOSK_USER}", user_js_path], check=False)
+    subprocess.run(["chown", "-R", f"{KIOSK_USER}:{KIOSK_USER}", profile_dir], check=False)
 
 def get_usb_status():
     try:
@@ -286,7 +294,7 @@ def update_url():
     new_url = request.form['new_url']
     try:
         subprocess.run(['sed', '-i', f's|KIOSK_URL=.*|KIOSK_URL=\\"{new_url}\\"|g', '/etc/kiosk/config'], check=True)
-        flash('URL updated successfully. Restart browser or reboot to apply.')
+        flash('URL updated successfully. Restart browser to apply.')
     except Exception as e:
         flash(f'Error updating URL: {str(e)}')
     return redirect(url_for('dashboard'))
