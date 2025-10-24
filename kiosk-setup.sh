@@ -1,23 +1,34 @@
 #!/bin/bash
 
-# EndeavourOS Kiosk Setup Script (Idempotent Version)
-# Safe for re-runs: Cleans conflicts, prompts for reset.
+# EndeavourOS Kiosk Setup Script
+# Usage: curl -sSL https://raw.githubusercontent.com/yourusername/yourrepo/main/kiosk-setup.sh | sudo bash
 
 set -e
 
-# Colors for output (unchanged)
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-print_status() { echo -e "${GREEN}[✓]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
-print_error() { echo -e "${RED}[✗]${NC} $1"; }
-print_info() { echo -e "${BLUE}[i]${NC} $1"; }
+print_status() {
+    echo -e "${GREEN}[✓]${NC} $1"
+}
 
-# Check root
+print_warning() {
+    echo -e "${YELLOW}[!]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[✗]${NC} $1"
+}
+
+print_info() {
+    echo -e "${BLUE}[i]${NC} $1"
+}
+
+# Check if running as root
 if [ "$EUID" -ne 0 ]; then 
     print_error "Please run with sudo"
     exit 1
@@ -25,13 +36,14 @@ fi
 
 echo ""
 echo "========================================"
-echo "  EndeavourOS Kiosk Setup (Idempotent)"
+echo "  EndeavourOS Kiosk Setup Installer"
 echo "========================================"
 echo ""
 
-# Interactive prompts (unchanged, but add reset check)
+# Interactive prompts
 read -p "Enter kiosk username: " KIOSK_USER
 
+# Password input with confirmation
 KIOSK_PASS=""
 KIOSK_PASS_CONFIRM=""
 while [ "$KIOSK_PASS" != "$KIOSK_PASS_CONFIRM" ] || [ -z "$KIOSK_PASS" ]; do
@@ -53,18 +65,7 @@ print_info "SSH Key Setup"
 echo "Paste your SSH public key (or press Enter to skip):"
 read -p "> " SSH_PUBLIC_KEY
 
-# Reset prompt for re-runs
-echo ""
-if id "$KIOSK_USER" &>/dev/null; then
-    read -p "User $KIOSK_USER exists. Full reset (delete profile/configs)? (y/N): " RESET_CONFIRM
-    if [[ "$RESET_CONFIRM" =~ ^[Yy]$ ]]; then
-        print_status "Full reset initiated..."
-        rm -rf /home/$KIOSK_USER/.mozilla /home/$KIOSK_USER/.config/openbox /home/$KIOSK_USER/.xinitrc /home/$KIOSK_USER/.bash_profile /home/$KIOSK_USER/kiosk.html /home/$KIOSK_USER/.xbindkeysrc
-        print_info "Reset complete."
-    fi
-fi
-
-# Confirmation (unchanged)
+# Confirmation
 echo ""
 echo "========================================"
 echo "Configuration Summary:"
@@ -74,174 +75,191 @@ echo "Kiosk URL: $KIOSK_URL"
 if [ -n "$SSH_PUBLIC_KEY" ]; then
     echo "SSH Key: Provided"
 else
-    echo "SSH Key: Not provided"
+    echo "SSH Key: Not provided (password auth will be used)"
 fi
 echo ""
-read -p "Continue? (y/N): " CONFIRM
+read -p "Continue with installation? (y/N): " CONFIRM
 
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-    print_error "Cancelled"
+    print_error "Installation cancelled"
     exit 1
 fi
 
-print_status "Starting..."
+echo ""
+print_status "Starting installation..."
 
-# Update/Install (idempotent: --needed skips)
-print_status "Updating/Installing packages..."
+# Update system
+print_status "Updating system..."
 pacman -Sy --noconfirm
-pacman -S --needed --noconfirm xorg-server xorg-xinit openbox firefox unclutter xdotool openssh usbguard xorg-xset sudo xbindkeys
-sleep 1
 
-# User (always re-set password/ownership)
-print_status "Handling user $KIOSK_USER..."
-if ! id "$KIOSK_USER" &>/dev/null; then
+# Install required packages (switched to firefox)
+print_status "Installing required packages..."
+pacman -S --needed --noconfirm \
+    xorg-server \
+    xorg-xinit \
+    openbox \
+    firefox \
+    unclutter \
+    xdotool \
+    openssh \
+    usbguard \
+    xorg-xset \
+    sudo
+
+# Create kiosk user
+print_status "Creating kiosk user..."
+if id "$KIOSK_USER" &>/dev/null; then
+    print_warning "User $KIOSK_USER already exists, updating configuration..."
+else
     useradd -m -s /bin/bash "$KIOSK_USER"
 fi
+
 echo "$KIOSK_USER:$KIOSK_PASS" | chpasswd
 usermod -aG wheel "$KIOSK_USER" 2>/dev/null || true
-chown -R "$KIOSK_USER:$KIOSK_USER" "/home/$KIOSK_USER"
-print_info "User ready."
 
-# SSH (unchanged, but log)
+# Setup SSH
 print_status "Configuring SSH..."
-mkdir -p "/home/$KIOSK_USER/.ssh"
-chmod 700 "/home/$KIOSK_USER/.ssh"
-if [ -n "$SSH_PUBLIC_KEY" ]; then
-    echo "$SSH_PUBLIC_KEY" > "/home/$KIOSK_USER/.ssh/authorized_keys"
-    chmod 600 "/home/$KIOSK_USER/.ssh/authorized_keys"
-fi
-chown -R "$KIOSK_USER:$KIOSK_USER" "/home/$KIOSK_USER/.ssh"
+mkdir -p /home/$KIOSK_USER/.ssh
+chmod 700 /home/$KIOSK_USER/.ssh
 
+if [ -n "$SSH_PUBLIC_KEY" ]; then
+    echo "$SSH_PUBLIC_KEY" > /home/$KIOSK_USER/.ssh/authorized_keys
+    chmod 600 /home/$KIOSK_USER/.ssh/authorized_keys
+    chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.ssh
+    print_status "SSH key configured"
+fi
+
+# Configure SSH daemon
 cat > /etc/ssh/sshd_config.d/kiosk.conf <<EOF
+# Kiosk SSH Configuration
 PermitRootLogin no
 PubkeyAuthentication yes
 PasswordAuthentication $([ -n "$SSH_PUBLIC_KEY" ] && echo "no" || echo "yes")
 AuthorizedKeysFile .ssh/authorized_keys
 EOF
 
-systemctl enable sshd --now
-print_info "SSH: journalctl -u sshd -n 10"
+systemctl enable sshd.service
+systemctl restart sshd.service
 
-# Config file
-print_status "Creating /etc/kiosk/config..."
+# Create config directory
+print_status "Creating configuration files..."
 mkdir -p /etc/kiosk
 cat > /etc/kiosk/config <<EOF
 KIOSK_URL="$KIOSK_URL"
 KIOSK_USER="$KIOSK_USER"
 EOF
+
 chmod 644 /etc/kiosk/config
 
-# DM/Autologin (idempotent: mask/disable safe to re-run)
-print_status "Configuring console boot/autologin..."
+# Disable display manager and boot to console (FIXED: disable first to avoid symlink conflict)
+print_status "Disabling display manager and enabling console boot..."
 systemctl disable display-manager.service 2>/dev/null || true
 systemctl mask display-manager.service
 systemctl set-default multi-user.target
 systemctl daemon-reload
 
+# Configure autologin on console tty1
+print_status "Configuring autologin for $KIOSK_USER..."
 mkdir -p /etc/systemd/system/getty@tty1.service.d/
+
+# Remove any existing autologin configuration
+rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
+rm -f /etc/systemd/system/getty@tty1.service.d/override.conf
+
+# Create new autologin configuration
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<EOF
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty -o '-p -f -- \\u' --noclear --autologin $KIOSK_USER %I \$TERM
 EOF
+
 systemctl daemon-reload
-systemctl enable getty@tty1
-print_info "Autologin: journalctl -u getty@tty1 -n 10"
+systemctl enable getty@tty1.service
 
-# Firefox profile (MANUAL CREATION TO AVOID DISPLAY REQUIREMENT)
-print_status "Setting up Firefox profile (cleaning existing)..."
-rm -rf "/home/$KIOSK_USER/.mozilla"
-mkdir -p "/home/$KIOSK_USER/.mozilla/firefox/kiosk"
-cat > "/home/$KIOSK_USER/.mozilla/firefox/profiles.ini" <<EOF
-[General]
-StartWithLastProfile=1
-
-[Profile0]
-Name=kiosk
-IsRelative=1
-Path=kiosk
-Default=1
-EOF
-cat > "/home/$KIOSK_USER/.mozilla/firefox/kiosk/user.js" <<EOF
-user_pref("browser.startup.homepage", "$KIOSK_URL");
-user_pref("browser.tabs.warnOnClose", false);
-user_pref("browser.tabs.warnOnCloseOtherTabs", false);
-user_pref("browser.tabs.warnOnOpen", false);
-user_pref("dom.disable_window_flip", true);
-user_pref("dom.disable_window_move_resize", true);
-user_pref("privacy.trackingprotection.enabled", true);
-user_pref("network.protocol-handler.warn-external.http", true);
-user_pref("network.protocol-handler.warn-external.https", true);
-user_pref("browser.safebrowsing.enabled", true);
-EOF
-chown -R "$KIOSK_USER:$KIOSK_USER" "/home/$KIOSK_USER/.mozilla"
-print_status "Profile ready."
-
-# HTML wrapper
-print_status "Creating kiosk.html..."
-cat > "/home/$KIOSK_USER/kiosk.html" <<EOF
-<!DOCTYPE html>
-<html><head><title>Kiosk</title><style>body, html { margin: 0; padding: 0; overflow: hidden; }</style></head>
-<body><iframe src="$KIOSK_URL" sandbox="allow-scripts allow-same-origin allow-forms allow-popups-to-escape-sandbox" style="border: none; width: 100%; height: 100vh;"></iframe>
-<script>document.addEventListener('contextmenu', e => e.preventDefault()); window.addEventListener('beforeunload', () => { window.location.href = '$KIOSK_URL'; }); setInterval(() => { document.querySelector('iframe').focus(); }, 5000);</script></body></html>
-EOF
-chown "$KIOSK_USER:$KIOSK_USER" "/home/$KIOSK_USER/kiosk.html"
-
-# .xinitrc
+# Create .xinitrc
 print_status "Creating .xinitrc..."
-cat > "/home/$KIOSK_USER/.xinitrc" <<'EOF'
+cat > /home/$KIOSK_USER/.xinitrc <<EOF
 #!/bin/bash
-xset s off && xset -dpms && xset s noblank
+
+# Disable screen blanking and power management
+xset s off
+xset -dpms
+xset s noblank
+
+# Hide cursor after inactivity
 unclutter -idle 0.1 &
-xbindkeys &
+
+# Start Openbox window manager
 exec openbox-session
 EOF
-chmod +x "/home/$KIOSK_USER/.xinitrc"
 
-# Openbox autostart
-print_status "Creating Openbox autostart..."
-mkdir -p "/home/$KIOSK_USER/.config/openbox"
-cat > "/home/$KIOSK_USER/.config/openbox/autostart" <<'EOF'
+chmod +x /home/$KIOSK_USER/.xinitrc
+
+# Create Openbox configuration (improved monitoring)
+print_status "Creating Openbox configuration..."
+mkdir -p /home/$KIOSK_USER/.config/openbox
+cat > /home/$KIOSK_USER/.config/openbox/autostart <<'AUTOSTART_SCRIPT'
 #!/bin/bash
-source /etc/kiosk/config
+
+# Load configuration if exists
+if [ -f /etc/kiosk/config ]; then
+    source /etc/kiosk/config
+else
+    echo "Kiosk config not found. Exiting." >&2
+    exit 1
+fi
+
+# Function to start browser in kiosk mode (using firefox)
 start_browser() {
-    firefox -P kiosk --kiosk "file:///home/$KIOSK_USER/kiosk.html" --private-window --no-remote --new-instance --disable-infobars --no-first-run --disable-session-crashed-bubble --disable-features=TranslateUI --check-for-update-interval=31536000 --disable-component-update --overscroll-history-navigation=0 --disable-pinch --disable-notifications --disable-popup-blocking --disable-dev-shm-usage --disable-extensions &
+    firefox \
+        --kiosk "$KIOSK_URL" \
+        --no-remote \
+        --new-instance \
+        --disable-infobars \
+        --no-first-run \
+        --disable-session-crashed-bubble \
+        --disable-features=TranslateUI \
+        --check-for-update-interval=31536000 \
+        --disable-component-update \
+        --overscroll-history-navigation=0 \
+        --disable-pinch \
+        --disable-notifications \
+        --disable-popup-blocking \
+        --disable-dev-shm-usage \
+        --disable-extensions &
 }
+
+# Start the browser
 start_browser
+
+# Monitor browser process and restart if closed (use pgrep for robustness)
 while true; do
-    if ! pgrep -f "firefox -P kiosk --kiosk" >/dev/null 2>&1; then
-        echo "Restarting browser..." >&2
+    if ! pgrep -f "firefox --kiosk" > /dev/null 2>&1; then
+        echo "Browser crashed or closed. Restarting..." >&2
         sleep 2
         start_browser
     fi
     sleep 5
 done
-EOF
-chmod +x "/home/$KIOSK_USER/.config/openbox/autostart"
+AUTOSTART_SCRIPT
 
-# xbindkeys
-print_status "Configuring keys..."
-cat > "/home/$KIOSK_USER/.xbindkeysrc" <<EOF
-"" Control + w
-"" Alt + F4
-EOF
-chown "$KIOSK_USER:$KIOSK_USER" "/home/$KIOSK_USER/.xbindkeysrc"
+chmod +x /home/$KIOSK_USER/.config/openbox/autostart
 
-# .bash_profile (force startx on tty1)
+# Create .bash_profile for auto-start X on console
 print_status "Creating .bash_profile..."
-cat > "/home/$KIOSK_USER/.bash_profile" <<EOF
-if [[ -z \$DISPLAY && \$(tty) = /dev/tty1 ]]; then
-    echo "[i] Starting X on tty1..."
+cat > /home/$KIOSK_USER/.bash_profile <<EOF
+if [[ -z \$DISPLAY ]] && [[ \$(tty) = /dev/tty1 ]]; then
     exec startx
 fi
 EOF
 
-# USBGuard (unchanged)
+# Configure USB blocking with USBGuard
 print_status "Configuring USBGuard..."
-mkdir -p /etc/usbguard
-usbguard generate-policy > /etc/usbguard/rules.conf 2>/dev/null || cat > /etc/usbguard/rules.conf <<EOF
-block
-EOF
+if [ ! -f /etc/usbguard/rules.conf ]; then
+    mkdir -p /etc/usbguard
+    usbguard generate-policy > /etc/usbguard/rules.conf 2>/dev/null || echo "allow" > /etc/usbguard/rules.conf
+fi
+
 cat > /etc/usbguard/usbguard-daemon.conf <<EOF
 RuleFile=/etc/usbguard/rules.conf
 ImplicitPolicyTarget=block
@@ -252,49 +270,112 @@ AuthorizedDefault=none
 RestoreControllerDeviceState=false
 DeviceManagerBackend=uevent
 EOF
-systemctl enable --now usbguard
-print_info "USB: journalctl -u usbguard -n 10"
 
-# Final chown
-chown -R "$KIOSK_USER:$KIOSK_USER" "/home/$KIOSK_USER"
+systemctl enable usbguard.service
 
-# Management scripts (unchanged from debug version, with logs)
+# Set proper ownership
+chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER
+
+# Create management script for updating URL
 print_status "Creating management scripts..."
-
-# kiosk-update-url
-cat > /usr/local/bin/kiosk-update-url <<'EOF'
+cat > /usr/local/bin/kiosk-update-url <<'UPDATE_SCRIPT'
 #!/bin/bash
-source /etc/kiosk/config
-read -p "New URL: " NEW_URL
-sed -i "s|^KIOSK_URL=.*|KIOSK_URL=\"$NEW_URL\"|" /etc/kiosk/config
-pkill -f "firefox -P kiosk" || true
-sleep 2
-su - $KIOSK_USER -c "DISPLAY=:0 firefox -P kiosk --kiosk \"file:///home/$KIOSK_USER/kiosk.html\" --private-window --no-remote --new-instance &"
-echo "Updated to $NEW_URL"
-EOF
+
+if [ "$EUID" -ne 0 ]; then 
+    echo "Please run with sudo"
+    exit 1
+fi
+
+if [ -z "$1" ]; then
+    echo "Usage: sudo kiosk-update-url <new-url>"
+    if [ -f /etc/kiosk/config ]; then
+        echo "Current URL: $(grep KIOSK_URL /etc/kiosk/config | cut -d'"' -f2)"
+    fi
+    exit 1
+fi
+
+NEW_URL="$1"
+if [ -f /etc/kiosk/config ]; then
+    sed -i "s|KIOSK_URL=.*|KIOSK_URL=\"$NEW_URL\"|g" /etc/kiosk/config
+    echo "Kiosk URL updated to: $NEW_URL"
+else
+    echo "Config not found. Run the main installer first."
+    exit 1
+fi
+echo "Restart the system or kill firefox process for changes to take effect."
+echo "To restart immediately: sudo systemctl restart getty@tty1"
+UPDATE_SCRIPT
+
 chmod +x /usr/local/bin/kiosk-update-url
 
-# kiosk-status
-cat > /usr/local/bin/kiosk-status <<'EOF'
+# Create script to show current config
+cat > /usr/local/bin/kiosk-status <<'STATUS_SCRIPT'
 #!/bin/bash
-source /etc/kiosk/config
-echo "Kiosk Status for $KIOSK_USER:"
-echo "URL: $KIOSK_URL"
-if pgrep -f "firefox -P kiosk --kiosk" >/dev/null; then
-    echo "Browser: Running"
+
+echo "========================================"
+echo "  Kiosk Status"
+echo "========================================"
+echo ""
+
+if [ -f /etc/kiosk/config ]; then
+    source /etc/kiosk/config
+    echo "Username: $KIOSK_USER"
+    echo "Current URL: $KIOSK_URL"
 else
-    echo "Browser: Not running"
+    echo "Kiosk not configured"
+    exit 1
 fi
-echo "X Session: $(ps aux | grep "[s]tartx" | wc -l) instances"
-echo "To update URL: kiosk-update-url"
-EOF
-chmod +x /usr/local/bin/kiosk-status
 
 echo ""
-print_status "Setup complete! Please reboot to activate the kiosk mode."
+echo "Boot Target: $(systemctl get-default)"
+echo "DM Status: $(systemctl is-enabled display-manager.service 2>/dev/null || echo 'masked/disabled')"
+echo "SSH Status: $(systemctl is-active sshd)"
+echo "USBGuard Status: $(systemctl is-active usbguard)"
+
+if pgrep -f "firefox --kiosk" > /dev/null; then
+    echo "Browser Status: Running"
+else
+    echo "Browser Status: Not running"
+fi
+
 echo ""
-print_info "After reboot, the system will auto-login as $KIOSK_USER and start the kiosk browser."
-IP=$(ip route get 1 | awk '{print $7; exit}')
-echo "To connect via SSH: ssh $KIOSK_USER@$IP"
-echo "To check status post-reboot: sudo kiosk-status"
+echo "Available commands:"
+echo "  sudo kiosk-update-url <url>  - Update kiosk URL"
+echo "  kiosk-status                  - Show this status"
+echo "  sudo reboot                   - Restart to apply changes"
+STATUS_SCRIPT
+
+chmod +x /usr/local/bin/kiosk-status
+
+# Final summary
 echo ""
+echo "========================================"
+print_status "Installation Complete!"
+echo "========================================"
+echo ""
+print_info "Configuration:"
+echo "  • Username: $KIOSK_USER"
+echo "  • Kiosk URL: $KIOSK_URL"
+echo "  • Boot Mode: Console (DM disabled/masked)"
+echo "  • SSH: Enabled on port 22"
+if [ -n "$SSH_PUBLIC_KEY" ]; then
+    echo "  • SSH Auth: Key-based only"
+else
+    echo "  • SSH Auth: Password (consider adding SSH key later)"
+fi
+echo "  • USB Protection: Enabled"
+echo ""
+print_info "Management Commands:"
+echo "  • Update URL: sudo kiosk-update-url <new-url>"
+echo "  • Check status: kiosk-status"
+echo ""
+print_info "SSH Connection:"
+echo "  ssh $KIOSK_USER@\$(hostname -I | awk '{print \$1}')"
+echo ""
+print_warning "REBOOT REQUIRED FOR KIOSK MODE (DM changes take effect)"
+echo "  sudo reboot"
+echo ""
+print_info "To revert to graphical boot later:"
+echo "  sudo systemctl unmask display-manager.service"
+echo "  sudo systemctl set-default graphical.target"
+echo "  sudo reboot"
