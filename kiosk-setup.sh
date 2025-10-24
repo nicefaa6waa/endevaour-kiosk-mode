@@ -104,7 +104,8 @@ pacman -S --needed --noconfirm \
     openssh \
     usbguard \
     xorg-xset \
-    sudo
+    sudo \
+    python-flask
 
 # Create kiosk user
 print_status "Creating kiosk user..."
@@ -380,6 +381,158 @@ STATUS_SCRIPT
 
 chmod +x /usr/local/bin/kiosk-status
 
+# Create web control app
+print_status "Creating web control app..."
+SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || echo "default_secret_key_change_me")
+cat > /usr/local/bin/kiosk-webapp.py <<PYEOF
+#!/usr/bin/env python3
+
+import os
+import subprocess
+from flask import Flask, request, session, redirect, url_for, render_template_string, flash
+
+app = Flask(__name__)
+app.secret_key = '$SECRET_KEY'
+
+KIOSK_USER = '$KIOSK_USER'
+KIOSK_PASS = '$KIOSK_PASS'
+
+def logged_in():
+    return session.get('logged_in', False)
+
+@app.before_request
+def require_login():
+    if request.endpoint and request.endpoint != 'login' and request.endpoint != 'static' and not logged_in():
+        return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        if request.form['username'] == KIOSK_USER and request.form['password'] == KIOSK_PASS:
+            session['logged_in'] = True
+            flash('Logged in successfully')
+            return redirect(url_for('dashboard'))
+        else:
+            flash('Invalid credentials')
+    return render_template_string('''
+<!DOCTYPE html>
+<html><head><title>Kiosk Login</title></head><body>
+<h1>Kiosk Control Login</h1>
+<form method="post">
+    Username: <input type="text" name="username"><br><br>
+    Password: <input type="password" name="password"><br><br>
+    <input type="submit" value="Login">
+</form>
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <ul>
+    {% for message in messages %}
+      <li>{{ message }}</li>
+    {% endfor %}
+    </ul>
+  {% endif %}
+{% endwith %}
+</body></html>
+    ''')
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    flash('Logged out successfully')
+    return redirect(url_for('login'))
+
+@app.route('/')
+def dashboard():
+    try:
+        status_output = subprocess.check_output(['/usr/local/bin/kiosk-status']).decode('utf-8')
+    except:
+        status_output = "Error getting status"
+    try:
+        with open('/etc/kiosk/config', 'r') as f:
+            lines = f.readlines()
+            url_line = [line for line in lines if 'KIOSK_URL' in line][0]
+            current_url = url_line.split('=')[1].strip().strip('"')
+    except:
+        current_url = "Unknown"
+    return render_template_string('''
+<!DOCTYPE html>
+<html><head><title>Kiosk Dashboard</title></head><body>
+<h1>Kiosk Dashboard</h1>
+<p><a href="/logout">Logout</a></p>
+<h2>Current URL: {{ current_url }}</h2>
+<h2>Status</h2>
+<pre>{{ status_output }}</pre>
+<h2>Update URL</h2>
+<form method="post" action="/update_url">
+    New URL: <input type="text" name="new_url" value="{{ current_url }}"><br><br>
+    <input type="submit" value="Update URL">
+</form>
+<h2>Controls</h2>
+<p><a href="/restart_browser">Restart Browser</a></p>
+<p><a href="/reboot" onclick="return confirm('Reboot the system?')">Reboot System</a></p>
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <ul>
+    {% for message in messages %}
+      <li>{{ message }}</li>
+    {% endfor %}
+    </ul>
+  {% endif %}
+{% endwith %}
+</body></html>
+    ''', status_output=status_output, current_url=current_url)
+
+@app.route('/update_url', methods=['POST'])
+def update_url():
+    new_url = request.form['new_url']
+    try:
+        subprocess.run(['sed', '-i', f's|KIOSK_URL=.*|KIOSK_URL=\\"{new_url}\\"|g', '/etc/kiosk/config'], check=True)
+        flash('URL updated successfully. Restart browser or reboot to apply.')
+    except Exception as e:
+        flash(f'Error updating URL: {str(e)}')
+    return redirect(url_for('dashboard'))
+
+@app.route('/restart_browser')
+def restart_browser():
+    try:
+        subprocess.run(['pkill', '-f', 'firefox'], check=True)
+        flash('Browser restarted successfully.')
+    except Exception as e:
+        flash(f'Error restarting browser: {str(e)}')
+    return redirect(url_for('dashboard'))
+
+@app.route('/reboot')
+def reboot():
+    os.system('reboot')
+    return 'Rebooting...'
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080, debug=False)
+PYEOF
+
+chmod 600 /usr/local/bin/kiosk-webapp.py
+
+# Create systemd service for web app
+print_status "Creating web app systemd service..."
+cat > /etc/systemd/system/kiosk-web.service <<EOF
+[Unit]
+Description=Kiosk Web Control App
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python /usr/local/bin/kiosk-webapp.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable kiosk-web.service
+
 # Final summary
 echo ""
 echo "========================================"
@@ -399,18 +552,22 @@ else
 fi
 echo "  • USB Protection: Enabled"
 echo "  • Firefox: Custom preferences applied (Web Speech disabled, notifications/promos disabled, swipe gestures disabled)"
+echo "  • Web Control: http://[IP]:8080 (login with kiosk credentials)"
 echo ""
 print_info "Management Commands:"
 echo "  • Update URL: sudo kiosk-update-url <new-url>"
 echo "  • Check status: kiosk-status"
+echo "  • Web Dashboard: http://IP:8080"
 echo ""
 print_info "SSH Connection:"
 IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
 if [ -n "$IP" ]; then
     echo "  ssh $KIOSK_USER@$IP"
+    echo "  Web: http://$IP:8080"
 else
     HOSTNAME=$(hostname)
     echo "  ssh $KIOSK_USER@$HOSTNAME (or use IP address)"
+    echo "  Web: http://$HOSTNAME:8080 (or use IP address)"
 fi
 echo ""
 print_warning "REBOOT REQUIRED FOR KIOSK MODE (DM changes take effect)"
@@ -420,3 +577,5 @@ print_info "To revert to graphical boot later:"
 echo "  sudo systemctl unmask display-manager.service"
 echo "  sudo systemctl set-default graphical.target"
 echo "  sudo reboot"
+echo ""
+print_warning "Note: Web app password is stored in plain text in /usr/local/bin/kiosk-webapp.py (root-only access)"
