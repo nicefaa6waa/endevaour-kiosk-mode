@@ -237,16 +237,16 @@ mkdir -p /home/$KIOSK_USER/.config/openbox
 cat > /home/$KIOSK_USER/.config/openbox/autostart <<'AUTOSTART_SCRIPT'
 #!/bin/bash
 
-# Load configuration if exists
-if [ -f /etc/kiosk/config ]; then
-    source /etc/kiosk/config
-else
-    echo "Kiosk config not found. Exiting." >&2
-    exit 1
-fi
-
 # Function to start browser in kiosk mode (using firefox)
 start_browser() {
+    # Load configuration each time to pick up changes
+    if [ -f /etc/kiosk/config ]; then
+        source /etc/kiosk/config
+    else
+        echo "Kiosk config not found. Exiting." >&2
+        exit 1
+    fi
+
     firefox \
         --kiosk "$KIOSK_URL" \
         --no-remote \
