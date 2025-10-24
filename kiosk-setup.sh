@@ -376,8 +376,13 @@ echo "  • Update URL: sudo kiosk-update-url <new-url>"
 echo "  • Check status: kiosk-status"
 echo ""
 print_info "SSH Connection:"
-IP=$(hostname -I | awk '{print $1}')
-echo "  ssh $KIOSK_USER@$IP"
+IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
+if [ -n "$IP" ]; then
+    echo "  ssh $KIOSK_USER@$IP"
+else
+    HOSTNAME=$(hostname)
+    echo "  ssh $KIOSK_USER@$HOSTNAME (or use IP address)"
+fi
 echo ""
 print_warning "REBOOT REQUIRED FOR KIOSK MODE (DM changes take effect)"
 echo "  sudo reboot"
