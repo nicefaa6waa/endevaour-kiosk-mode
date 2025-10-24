@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # EndeavourOS Kiosk Setup Script
-# Usage: curl -sSL https://raw.githubusercontent.com/yourusername/yourrepo/main/kiosk-setup.sh | sudo bash
-# Note: For readability, the Python web app is now in a separate file: kiosk-webapp.py
-#       Place it at /usr/local/bin/kiosk-webapp.py before running, or embed via heredoc if preferred.
+# Usage: Place this script and kiosk-webapp.py in the same directory, then run: sudo bash kiosk-setup.sh
+#        (Make executable if desired: chmod +x kiosk-setup.sh)
 
 set -e
 
@@ -33,6 +32,12 @@ print_info() {
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then 
     print_error "Please run with sudo"
+    exit 1
+fi
+
+# Check if kiosk-webapp.py exists in current directory
+if [ ! -f "./kiosk-webapp.py" ]; then
+    print_error "kiosk-webapp.py not found in the current directory. Please ensure both files are in the same folder."
     exit 1
 fi
 
@@ -384,17 +389,15 @@ STATUS_SCRIPT
 
 chmod +x /usr/local/bin/kiosk-status
 
-# Create web control app (Python now separate - copy kiosk-webapp.py to /usr/local/bin/ before running)
-print_status "Setting up web control app..."
-# TODO: If embedding, use: cat > /usr/local/bin/kiosk-webapp.py <<PYEOF ... PYEOF
-# For now, assume pre-placed or adjust path
-if [ ! -f /usr/local/bin/kiosk-webapp.py ]; then
-    print_error "kiosk-webapp.py not found at /usr/local/bin/. Please place it there and rerun."
-    exit 1
-fi
+# Generate secret key for web app
+SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || echo "default_secret_key_change_me")
+
+# Copy web control app from current directory
+print_status "Copying web control app to /usr/local/bin/..."
+cp ./kiosk-webapp.py /usr/local/bin/kiosk-webapp.py
 chmod 600 /usr/local/bin/kiosk-webapp.py
 
-# Create systemd service for web app
+# Create systemd service for web app with environment variables
 print_status "Creating web app systemd service..."
 cat > /etc/systemd/system/kiosk-web.service <<EOF
 [Unit]
@@ -405,6 +408,9 @@ After=network.target
 Type=simple
 User=root
 ExecStart=/usr/bin/python3 /usr/local/bin/kiosk-webapp.py
+Environment=KIOSK_SECRET_KEY=$SECRET_KEY
+Environment=KIOSK_USER=$KIOSK_USER
+Environment=KIOSK_PASS=$KIOSK_PASS
 Restart=always
 RestartSec=5
 
@@ -468,4 +474,4 @@ echo "  sudo systemctl unmask display-manager.service"
 echo "  sudo systemctl set-default graphical.target"
 echo "  sudo reboot"
 echo ""
-print_warning "Note: Web app password is stored in plain text in /usr/local/bin/kiosk-webapp.py (root-only access)"
+print_warning "Note: Web app credentials are set via systemd environment (root-only access to service file)"
