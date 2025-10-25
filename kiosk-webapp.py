@@ -5,11 +5,10 @@ import subprocess
 from flask import Flask, request, session, redirect, url_for, render_template_string, flash
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('KIOSK_SECRET_KEY', 'default_secret_key_change_me')  # Set via env or replace
+app.secret_key = os.environ.get('KIOSK_SECRET_KEY', 'default_secret_key_change_me')
 
-# These will be set dynamically by the installer via env
-KIOSK_USER = os.environ.get('KIOSK_USER', 'kiosk')  # Fallback
-KIOSK_PASS = os.environ.get('KIOSK_PASS', '')  # Fallback - set securely
+KIOSK_USER = os.environ.get('KIOSK_USER', 'kiosk')
+KIOSK_PASS = os.environ.get('KIOSK_PASS', '')
 
 toggle_flags = {
     "infobars": ("--disable-infobars", "Disable Info Bars"),
@@ -28,16 +27,15 @@ toggle_flags = {
     "component_update": ("--disable-component-update", "Disable Component Update"),
     "sync": ("--disable-sync", "Disable Sync"),
     "default_apps": ("--disable-default-apps", "Disable Default Apps"),
+    "translate": ("--disable-translate", "Disable Translate"),
+    "translate_features": ("--disable-features=Translate", "Disable Translate Features"),
+    "pings": ("--no-pings", "No Pings"),
+    "phishing_detection": ("--disable-client-side-phishing-detection", "Disable Phishing Detection"),
+    "background_networking": ("--disable-background-networking", "Disable Background Networking"),
 }
 
 all_prefs = list(toggle_flags.keys())
 pref_names = {k: d for k, (_, d) in toggle_flags.items()}
-
-fixed_flags = [
-    '--user-data-dir=/home/$KIOSK_USER/.chrome-kiosk',
-    '--kiosk "$KIOSK_URL"',
-    '--no-first-run',
-]
 
 def load_prefs_states():
     states = {p: False for p in all_prefs}
@@ -58,10 +56,31 @@ def save_prefs(form_states):
             flag, _ = toggle_flags[pref]
             selected.append(flag)
 
-    all_flags_list = fixed_flags + selected
-    chrome_cmd = "google-chrome-stable \\\\\n        " + " \\\\\n        ".join(all_flags_list) + " &"
+    # Build the Chrome command with proper formatting
+    chrome_flags = [
+        '--no-sandbox',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-dev-shm-usage',
+        '--user-data-dir="$CHROME_PROFILE"',
+        '--kiosk "$KIOSK_URL"',
+        '--no-first-run',
+        '--disable-session-crashed-bubble',
+        '--no-default-browser-check',
+    ] + selected
 
-    start_browser_func = f'''start_browser() {{
+    chrome_cmd_lines = ["    google-chrome-stable \\"]
+    for flag in chrome_flags[:-1]:
+        chrome_cmd_lines.append(f"        {flag} \\")
+    chrome_cmd_lines.append(f"        {chrome_flags[-1]} &")
+    
+    chrome_cmd = "\n".join(chrome_cmd_lines)
+    chrome_cmd += "\n    \n    CHROME_PID=$!\n    echo \"$(date): Chrome started with PID: $CHROME_PID\" >> /tmp/kiosk.log"
+
+    full_autostart = f'''#!/bin/bash
+
+# Function to start browser in kiosk mode (using chrome)
+start_browser() {{
     # Load configuration each time to pick up changes
     if [ -f /etc/kiosk/config ]; then
         source /etc/kiosk/config
@@ -70,27 +89,37 @@ def save_prefs(form_states):
         exit 1
     fi
 
-    {chrome_cmd}
-}}'''
+    # Clear crash flag to prevent restore prompts
+    CHROME_PROFILE="$HOME/.chrome-kiosk"
+    if [ -f "$CHROME_PROFILE/Default/Preferences" ]; then
+        sed -i 's/"exited_cleanly":false/"exited_cleanly":true/g' "$CHROME_PROFILE/Default/Preferences"
+        sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/g' "$CHROME_PROFILE/Default/Preferences"
+    fi
 
-    monitor_part = '''# Monitor browser process and restart if closed (use pgrep for robustness, check all chrome)
+    echo "$(date): Starting Chrome kiosk with URL: $KIOSK_URL" >> /tmp/kiosk.log
+
+{chrome_cmd}
+}}
+
+# Ensure clean start: kill any lingering Chrome processes
+pkill -f google-chrome 2>/dev/null || true
+sleep 3
+
+# Start the browser
+start_browser
+
+# Monitor browser process and restart if closed
 while true; do
-    if ! pgrep google-chrome > /dev/null 2>&1; then
-        echo "Browser crashed or closed. Restarting..." >&2
+    if ! pgrep -f "google-chrome.*--kiosk" > /dev/null 2>&1; then
+        echo "$(date): Browser crashed or closed. Restarting..." >> /tmp/kiosk.log
         # Clean up any stragglers
         pkill -f google-chrome 2>/dev/null || true
         sleep 5
         start_browser
     fi
-    sleep 1
-done'''
-
-    beginning = '''#!/bin/bash
-
-# Function to start browser in kiosk mode (using chrome)
+    sleep 5
+done
 '''
-
-    full_autostart = beginning + start_browser_func + '\n\n# Ensure clean start: kill any lingering Chrome processes\npkill -f google-chrome 2>/dev/null || true\nsleep 3\n\n# Start the browser\nstart_browser\n\n' + monitor_part
 
     autostart_path = f"/home/{KIOSK_USER}/.config/openbox/autostart"
     with open(autostart_path, 'w') as f:
@@ -279,7 +308,7 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 def update_url():
     new_url = request.form['new_url']
     try:
-        subprocess.run(['sed', '-i', f's|KIOSK_URL=.*|KIOSK_URL=\\"{new_url}\\"|g', '/etc/kiosk/config'], check=True)
+        subprocess.run(['sed', '-i', f's|KIOSK_URL=.*|KIOSK_URL="{new_url}"|g', '/etc/kiosk/config'], check=True)
         flash('URL updated successfully. Restart browser to apply.')
     except Exception as e:
         flash(f'Error updating URL: {str(e)}')
