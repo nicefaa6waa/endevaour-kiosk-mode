@@ -289,7 +289,7 @@ start_browser
 
 # Monitor browser process and restart if closed
 while true; do
-    if ! pgrep -f "google-chrome.*--kiosk" > /dev/null 2>&1; then
+    if ! pgrep chrome > /dev/null 2>&1; then
         echo "$(date): Browser crashed or closed. Restarting..." >> /tmp/kiosk.log
         # Clean up any stragglers
         pkill -f google-chrome 2>/dev/null || true
