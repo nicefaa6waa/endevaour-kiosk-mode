@@ -220,19 +220,19 @@ EOF
 
 chmod +x /home/$KIOSK_USER/.xinitrc
 
-# Create Openbox configuration (FIXED: proper variable expansion)
+# Create Openbox configuration with grep-based URL loading
 print_status "Creating Openbox configuration..."
 mkdir -p /home/$KIOSK_USER/.config/openbox
-cat > /home/$KIOSK_USER/.config/openbox/autostart <<'AUTOSTART_SCRIPT'
+cat > /home/$KIOSK_USER/.config/openbox/autostart << 'AUTOSTART'
 #!/bin/bash
 
 # Function to start browser in kiosk mode (using chrome)
 start_browser() {
-    # Load configuration each time to pick up changes
-    if [ -f /etc/kiosk/config ]; then
-        source /etc/kiosk/config
-    else
-        echo "Kiosk config not found. Exiting." >&2
+    # Load configuration using grep to avoid source issues
+    KIOSK_URL=$(grep KIOSK_URL /etc/kiosk/config | cut -d'"' -f2)
+    
+    if [ -z "$KIOSK_URL" ]; then
+        echo "$(date): ERROR - KIOSK_URL is empty!" >> /tmp/kiosk.log
         exit 1
     fi
 
@@ -298,7 +298,7 @@ while true; do
     fi
     sleep 5
 done
-AUTOSTART_SCRIPT
+AUTOSTART
 
 chmod +x /home/$KIOSK_USER/.config/openbox/autostart
 
@@ -384,7 +384,8 @@ echo "========================================"
 echo ""
 
 if [ -f /etc/kiosk/config ]; then
-    source /etc/kiosk/config
+    KIOSK_USER=$(grep KIOSK_USER /etc/kiosk/config | cut -d'"' -f2)
+    KIOSK_URL=$(grep KIOSK_URL /etc/kiosk/config | cut -d'"' -f2)
     echo "Username: $KIOSK_USER"
     echo "Current URL: $KIOSK_URL"
 else
