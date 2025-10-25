@@ -220,7 +220,7 @@ EOF
 
 chmod +x /home/$KIOSK_USER/.xinitrc
 
-# Create Openbox configuration (improved monitoring)
+# Create Openbox configuration (FIXED: proper variable expansion)
 print_status "Creating Openbox configuration..."
 mkdir -p /home/$KIOSK_USER/.config/openbox
 cat > /home/$KIOSK_USER/.config/openbox/autostart <<'AUTOSTART_SCRIPT'
@@ -236,13 +236,14 @@ start_browser() {
         exit 1
     fi
 
-    # Clear crash flag to prevent restore prompts or crashes
+    # Clear crash flag to prevent restore prompts
     CHROME_PROFILE="$HOME/.chrome-kiosk"
     if [ -f "$CHROME_PROFILE/Default/Preferences" ]; then
         sed -i 's/"exited_cleanly":false/"exited_cleanly":true/g' "$CHROME_PROFILE/Default/Preferences"
+        sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/g' "$CHROME_PROFILE/Default/Preferences"
     fi
 
-    echo "Starting Chrome kiosk with URL: $KIOSK_URL" >> /tmp/kiosk.log
+    echo "$(date): Starting Chrome kiosk with URL: $KIOSK_URL" >> /tmp/kiosk.log
 
     google-chrome-stable \
         --no-sandbox \
@@ -268,7 +269,15 @@ start_browser() {
         --disable-component-update \
         --no-default-browser-check \
         --disable-sync \
-        --disable-default-apps &
+        --disable-default-apps \
+        --disable-translate \
+        --disable-features=Translate \
+        --no-pings \
+        --disable-client-side-phishing-detection \
+        --disable-background-networking &
+    
+    CHROME_PID=$!
+    echo "$(date): Chrome started with PID: $CHROME_PID" >> /tmp/kiosk.log
 }
 
 # Ensure clean start: kill any lingering Chrome processes
@@ -278,16 +287,16 @@ sleep 3
 # Start the browser
 start_browser
 
-# Monitor browser process and restart if closed (use pgrep for robustness, check all chrome)
+# Monitor browser process and restart if closed
 while true; do
-    if ! pgrep google-chrome > /dev/null 2>&1; then
+    if ! pgrep -f "google-chrome.*--kiosk" > /dev/null 2>&1; then
         echo "$(date): Browser crashed or closed. Restarting..." >> /tmp/kiosk.log
         # Clean up any stragglers
         pkill -f google-chrome 2>/dev/null || true
         sleep 5
         start_browser
     fi
-    sleep 1
+    sleep 5
 done
 AUTOSTART_SCRIPT
 
@@ -389,7 +398,7 @@ echo "DM Status: $(systemctl is-enabled display-manager.service 2>/dev/null || e
 echo "SSH Status: $(systemctl is-active ssh)"
 echo "USBGuard Status: $(systemctl is-active usbguard)"
 
-if pgrep -f "google-chrome --kiosk" > /dev/null; then
+if pgrep -f "google-chrome.*--kiosk" > /dev/null; then
     echo "Browser Status: Running"
 else
     echo "Browser Status: Not running"
